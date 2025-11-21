@@ -2,12 +2,13 @@ import torch
 from torch import optim
 import numpy as np
 import argparse
+import pandas as pd
 import time
 import os
 import random
 from torch.utils.data import DataLoader
 from data_provider.data_loader_emb import Dataset_ETT_hour, Dataset_ETT_minute, Dataset_Custom
-from models.TimeCMA import Dual
+from models.TimeAFFN import Dual
 from utils.metrics import MSE, MAE, metric
 import faulthandler
 faulthandler.enable()
@@ -16,14 +17,14 @@ os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "max_split_size_mb:150"
 
 def parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--device", type=str, default="cuda", help="")
-    parser.add_argument("--data_path", type=str, default="ETTm1", help="data path")
+    parser.add_argument("--device", type=str, default="cuda:0", help="")
+    parser.add_argument("--data_path", type=str, default="ours", help="data path")
     parser.add_argument("--channel", type=int, default=32, help="number of features")
-    parser.add_argument("--num_nodes", type=int, default=7, help="number of nodes")
-    parser.add_argument("--seq_len", type=int, default=96, help="seq_len")
-    parser.add_argument("--pred_len", type=int, default=96, help="out_len")
-    parser.add_argument("--batch_size", type=int, default=128, help="batch size")
-    parser.add_argument("--learning_rate", type=float, default=1e-4, help="learning rate")
+    parser.add_argument("--num_nodes", type=int, default=3, help="number of nodes")
+    parser.add_argument("--seq_len", type=int, default=256, help="seq_len")
+    parser.add_argument("--pred_len", type=int, default=128, help="out_len")
+    parser.add_argument("--batch_size", type=int, default=128, help="batch size128")
+    parser.add_argument("--learning_rate", type=float, default=1e-3, help="learning rate")
     parser.add_argument("--dropout_n", type=float, default=0.2, help="dropout rate of neural network layers")
     parser.add_argument("--d_llm", type=int, default=768, help="hidden dimensions")
     parser.add_argument("--e_layer", type=int, default=1, help="layers of transformer encoder")
@@ -32,7 +33,7 @@ def parse_args():
     parser.add_argument("--weight_decay", type=float, default=1e-3, help="weight decay rate")
     parser.add_argument("--num_workers", type=int, default=10)
     parser.add_argument("--model_name", type=str, default="gpt2", help="llm")
-    parser.add_argument("--epochs", type=int, default=100, help="")
+    parser.add_argument("--epochs", type=int, default=150, help="")
     parser.add_argument('--seed', type=int, default=2024, help='random seed')
     parser.add_argument(
         "--es_patience",
@@ -137,13 +138,13 @@ def main():
 
     print()
     seed_it(args.seed)
-    # device = torch.device(args.device)
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = torch.device(args.device)
+    # device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     
     loss = 9999999
     test_log = 999999
     epochs_since_best_mse = 0
-
+    import os
     path = os.path.join(args.save, args.data_path, 
                         f"{args.pred_len}_{args.channel}_{args.e_layer}_{args.d_layer}_{args.learning_rate}_{args.dropout_n}_{args.seed}/")
     if not os.path.exists(path):
@@ -179,6 +180,8 @@ def main():
         train_mae = []
         
         for iter, (x,y,x_mark,y_mark, embeddings) in enumerate(train_loader):
+            # print(torch.isnan(x).any(), torch.isinf(x).any())
+            # print(torch.isnan(y).any(), torch.isinf(y).any())
             trainx = torch.Tensor(x).to(device) # [B, L, N]
             trainy = torch.Tensor(y).to(device)
             trainx_mark = torch.Tensor(x_mark).to(device) 
@@ -338,6 +341,111 @@ def main():
 
     log = "On average horizons, Test MSE: {:.4f}, Test MAE: {:.4f}"
     print(log.format(np.mean(amse), np.mean(amae)))
+        # ===================== 绘图部分 =====================
+    # import matplotlib.pyplot as plt
+    # import os
+
+    # # 取一个样本批次用于可视化（避免太大）
+    # # test_pre/test_real 维度：[样本数, pred_len, 特征数]
+    # # 如果你的目标是单变量预测（比如瓦斯浓度），取第一个特征即可
+    # sample_index = 0
+    # pred_sample = test_pre[sample_index, :, 0].cpu().numpy()
+    # real_sample = test_real[sample_index, :, 0].cpu().numpy()
+
+    # plt.figure(figsize=(10, 5))
+    # plt.plot(real_sample, label='Real', linewidth=2)
+    # plt.plot(pred_sample, label='Predicted', linestyle='--', linewidth=2)
+    # plt.title(f"Test Sample {sample_index} - Prediction vs Real")
+    # plt.xlabel("Time Step")
+    # plt.ylabel("Value")
+    # plt.legend()
+    # plt.grid(True)
+    import matplotlib.pyplot as plt
+    # ===================== 保存目录 =====================
+    save_dir = os.path.join(args.save, "plots")
+    os.makedirs(save_dir, exist_ok=True)
+
+    def plot_sequence_comparison(real, pred, title, save_name, scaler=None):
+        """
+        绘制不同预测步（1、8、16、32）的预测 vs 实际对比图，并导出反归一化后的数据
+        real, pred: [样本数, seq_len, 特征数] 或 [样本数, seq_len]
+        """
+        # 转CPU与numpy
+        if not isinstance(real, np.ndarray):
+            real = real.detach().cpu().numpy()
+        if not isinstance(pred, np.ndarray):
+            pred = pred.detach().cpu().numpy()
+
+        num_features = real.shape[-1] if len(real.shape) == 3 else 1
+        horizon_steps = [31, 63, 127]  # 第1、8、16、32个点（索引从0开始）
+
+        # 反归一化
+        if scaler is not None:
+            real_flat = real.reshape(-1, num_features)
+            pred_flat = pred.reshape(-1, num_features)
+            real_flat = scaler.inverse_transform(real_flat)
+            pred_flat = scaler.inverse_transform(pred_flat)
+            real = real_flat.reshape(real.shape)
+            pred = pred_flat.reshape(pred.shape)
+
+        # ========= 绘图与导出 =========
+        plt.figure(figsize=(14, 8))
+
+        for i in range(num_features):
+            plt.subplot(num_features, 1, i + 1)
+
+            # 依次画出第 1、8、16、32 步的预测结果
+            for step in horizon_steps:
+                # 防止超出预测长度
+                if step >= real.shape[1]:
+                    continue
+
+                real_long = real[:, step, i]
+                pred_long = pred[:, step, i]
+
+                plt.plot(real_long, label=f'Real Step {step+1}', linewidth=1.5)
+                plt.plot(pred_long, label=f'Pred Step {step+1}', linestyle='--', linewidth=1.5)
+
+                # === 导出反归一化数据到Excel ===
+                df_out = pd.DataFrame({
+                    f'Real_Step_{step+1}': real_long,
+                    f'Pred_Step_{step+1}': pred_long
+                })
+                excel_path = os.path.join(save_dir, f"{save_name}_feature{i+1}_step{step+1}.xlsx")
+                df_out.to_excel(excel_path, index=False)
+                print(f"✅ Exported Excel: {excel_path}")
+
+            plt.title(f"{title} - Feature {i+1}")
+            plt.xlabel("Sample Index")
+            plt.ylabel("Value")
+            plt.legend()
+            plt.grid(True)
+
+        plt.tight_layout()
+        save_path = os.path.join(save_dir, f"{save_name}_steps_1_8_16_32.png")
+        plt.savefig(save_path, dpi=300)
+        plt.close()
+        print(f"✅ Saved plot: {save_path}")
+
+
+
+    # ===================== 执行绘图与导出 =====================
+
+    # ⚠️ 假设你的 dataset 中包含 scaler 对象
+    # scaler = getattr(train_data, "scaler", None)  # 如果你用的 Dataset_Custom，里面就有 scaler
+
+    # plot_sequence_comparison(train_real, train_pre,
+    #                         "Training Set - Prediction vs Real",
+    #                         "train_comparison", scaler=scaler)
+
+    # plot_sequence_comparison(val_real, val_pre,
+    #                         "Validation Set - Prediction vs Real",
+    #                         "val_comparison", scaler=scaler)
+
+    plot_sequence_comparison(test_real, test_pre,
+                            "Test Set - Prediction vs Real",
+                            "test_comparison", scaler=scaler)
+
 
 if __name__ == "__main__":
     t1 = time.time()
