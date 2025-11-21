@@ -11,7 +11,7 @@ import h5py
 warnings.filterwarnings('ignore')
 
 class Dataset_ETT_hour(Dataset):
-    def __init__(self, root_path="/mnt/sfs-common/dataset/", flag='train', size=None, 
+    def __init__(self, root_path="../data/ETT-small/", flag='train', size=None, 
                  features='M', data_path='ETTh1',
                  target='OT', scale=False, inverse=False, timeenc=0, freq='h'):
 
@@ -43,9 +43,9 @@ class Dataset_ETT_hour(Dataset):
 
     def __read_data__(self):
         self.scaler = StandardScaler()
-        df_raw = pd.read_csv(os.path.join(self.root_path,
-                                          self.data_path))
-
+        # df_raw = pd.read_csv(os.path.join(self.root_path,
+        #                                   self.data_path))
+        df_raw = pd.read_csv(self.data_path)
         border1s = [0, 12*30*24 - self.seq_len, 12*30*24+4*30*24 - self.seq_len]
         border2s = [12*30*24, 12*30*24+4*30*24, 12*30*24+8*30*24]
         border1 = border1s[self.set_type]
@@ -103,7 +103,7 @@ class Dataset_ETT_hour(Dataset):
         return self.scaler.inverse_transform(data)
 
 class Dataset_ETT_minute(Dataset):
-    def __init__(self, root_path="/mnt/sfs-common/dataset/", flag='train', size=None, 
+    def __init__(self, root_path="../data/ETT-small/", flag='train', size=None, 
                  features='M', data_path='ETTm1', 
                  target='OT', scale=False, inverse=False, timeenc=0, freq='t', cols=None):
 
@@ -140,9 +140,9 @@ class Dataset_ETT_minute(Dataset):
 
     def __read_data__(self):
         self.scaler = StandardScaler()
-        df_raw = pd.read_csv(os.path.join(self.root_path,
-                                          self.data_path))
-
+        # df_raw = pd.read_csv(os.path.join(self.root_path,
+        #                                   self.data_path))
+        df_raw = pd.read_csv(self.data_path)
         border1s = [0, 12*30*24*4 - self.seq_len, 12*30*24*4+4*30*24*4 - self.seq_len]
         border2s = [12*30*24*4, 12*30*24*4+4*30*24*4, 12*30*24*4+8*30*24*4]
         border1 = border1s[self.set_type]
@@ -204,9 +204,9 @@ class Dataset_ETT_minute(Dataset):
         return self.scaler.inverse_transform(data)
 
 class Dataset_Custom(Dataset):
-    def __init__(self, root_path="/mnt/sfs-common/dataset/", flag='train', size=None,
-                 features='M', data_path='ECL',
-                 target='OT', scale=False, timeenc=0, freq='h',patch_len=16,percent=100):
+    def __init__(self, root_path="../data/ours/", flag='train', size=None,
+                 features='M', data_path='ours',
+                 target='GAS', scale=False, timeenc=0, freq='h',patch_len=16,percent=100):
         # size [seq_len, label_len, pred_len]
         # info
         self.percent = percent
@@ -243,9 +243,9 @@ class Dataset_Custom(Dataset):
 
     def __read_data__(self):
         self.scaler = StandardScaler()
-        df_raw = pd.read_csv(os.path.join(self.root_path,
-                                          self.data_path))
-
+        # df_raw = pd.read_csv(os.path.join(self.root_path,
+        #                                   self.data_path))
+        df_raw = pd.read_csv(self.data_path)
         '''
         df_raw.columns: ['date', ...(other features), target feature]
         '''
